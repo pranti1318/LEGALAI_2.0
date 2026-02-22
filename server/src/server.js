@@ -7,7 +7,7 @@ const path = require('path');
 const http = require('http');
 const { Server } = require('socket.io');
 
-const connectDB = require('./config/db');
+const supabase = require('./config/supabase');
 const errorHandler = require('./middleware/errorHandler');
 const SocketService = require('./services/socketService');
 
@@ -19,8 +19,8 @@ const appointmentRoutes = require('./routes/appointmentRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const chatRoutes = require('./routes/chatRoutes');
 
-// Connect to database
-connectDB();
+// Supabase client is already initialized in config/supabase.js
+console.log('⚡ Supabase Client Initialized');
 
 const app = express();
 const server = http.createServer(app);

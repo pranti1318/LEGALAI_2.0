@@ -1,5 +1,5 @@
 const axios = require('axios');
-const Document = require('../models/Document');
+const supabase = require('../config/supabase');
 const path = require('path');
 const fs = require('fs');
 
@@ -21,16 +21,22 @@ exports.uploadDocument = async (req, res) => {
         if (ext === '.pdf') fileType = 'pdf';
         if (['.doc', '.docx'].includes(ext)) fileType = 'doc';
 
-        // Create document record
-        const document = await Document.create({
-            user: req.user.id,
-            originalName: req.file.originalname,
-            fileName: req.file.filename,
-            filePath: req.file.path,
-            fileType,
-            fileSize: req.file.size,
-            status: 'uploaded'
-        });
+        // Create document record in Supabase
+        const { data: document, error } = await supabase
+            .from('documents')
+            .insert([{
+                user_id: req.user.id,
+                title: req.file.originalname,
+                file_name: req.file.filename,
+                file_path: req.file.path,
+                file_type: fileType,
+                file_size: req.file.size,
+                status: 'uploaded'
+            }])
+            .select()
+            .single();
+
+        if (error) throw error;
 
         res.status(201).json({
             success: true,
@@ -50,9 +56,13 @@ exports.uploadDocument = async (req, res) => {
 // @access  Private
 exports.analyzeDocument = async (req, res) => {
     try {
-        const document = await Document.findById(req.params.id);
+        const { data: document, error: fetchError } = await supabase
+            .from('documents')
+            .select('*')
+            .eq('id', req.params.id)
+            .single();
 
-        if (!document) {
+        if (fetchError || !document) {
             return res.status(404).json({
                 success: false,
                 message: 'Document not found'
@@ -60,60 +70,72 @@ exports.analyzeDocument = async (req, res) => {
         }
 
         // Check ownership
-        if (document.user.toString() !== req.user.id) {
+        if (document.user_id !== req.user.id) {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to analyze this document'
             });
         }
 
-        // Update status
-        document.status = 'processing';
-        await document.save();
+        // Update status to processing
+        await supabase
+            .from('documents')
+            .update({ status: 'processing' })
+            .eq('id', document.id);
 
         try {
             // Call AI service
             const aiServiceUrl = process.env.AI_SERVICE_URL || 'http://localhost:8000';
 
             // Read file and send to AI service
-            const fileBuffer = fs.readFileSync(document.filePath);
+            const fileBuffer = fs.readFileSync(document.file_path);
             const base64File = fileBuffer.toString('base64');
 
             const response = await axios.post(`${aiServiceUrl}/analyze`, {
                 file: base64File,
-                fileName: document.originalName,
-                fileType: document.fileType
+                fileName: document.title,
+                fileType: document.file_type
             }, {
-                timeout: 120000 // 2 minute timeout for processing
+                timeout: 120000
             });
 
             // Update document with analysis
-            document.ocrText = response.data.ocrText || '';
-            document.analysis = response.data.analysis || {};
-            document.status = 'analyzed';
-            document.analyzedAt = new Date();
-            await document.save();
+            const { data: updatedDoc, error: updateError } = await supabase
+                .from('documents')
+                .update({
+                    analysis: response.data.analysis || {},
+                    status: 'analyzed',
+                    updated_at: new Date()
+                })
+                .eq('id', document.id)
+                .select()
+                .single();
+
+            if (updateError) throw updateError;
 
             res.status(200).json({
                 success: true,
-                data: document
+                data: updatedDoc
             });
         } catch (aiError) {
             console.error('AI Service Error:', aiError.message);
-            document.status = 'failed';
-            document.processingError = aiError.message || 'AI service unavailable';
-            await document.save();
 
             // Return mock analysis for demo purposes
             const mockAnalysis = generateMockAnalysis();
-            document.analysis = mockAnalysis;
-            document.status = 'analyzed';
-            document.analyzedAt = new Date();
-            await document.save();
+            const { data: mockDoc } = await supabase
+                .from('documents')
+                .update({
+                    analysis: mockAnalysis,
+                    status: 'analyzed',
+                    updated_at: new Date()
+                })
+                .eq('id', document.id)
+                .select()
+                .single();
 
             res.status(200).json({
                 success: true,
-                data: document,
+                data: mockDoc,
                 note: 'Demo analysis provided (AI service offline)'
             });
         }
@@ -133,24 +155,27 @@ exports.getDocuments = async (req, res) => {
     try {
         const { status, page = 1, limit = 10 } = req.query;
 
-        const query = { user: req.user.id };
-        if (status) query.status = status;
+        let query = supabase
+            .from('documents')
+            .select('*', { count: 'exact' })
+            .eq('user_id', req.user.id);
 
-        const skip = (parseInt(page) - 1) * parseInt(limit);
+        if (status) query = query.eq('status', status);
 
-        const documents = await Document.find(query)
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(parseInt(limit))
-            .select('-ocrText'); // Exclude full OCR text from list
+        const from = (parseInt(page) - 1) * parseInt(limit);
+        const to = from + parseInt(limit) - 1;
 
-        const total = await Document.countDocuments(query);
+        const { data: documents, error, count } = await query
+            .order('created_at', { ascending: false })
+            .range(from, to);
+
+        if (error) throw error;
 
         res.status(200).json({
             success: true,
             count: documents.length,
-            total,
-            totalPages: Math.ceil(total / parseInt(limit)),
+            total: count,
+            totalPages: Math.ceil(count / parseInt(limit)),
             data: documents
         });
     } catch (error) {
@@ -167,9 +192,13 @@ exports.getDocuments = async (req, res) => {
 // @access  Private
 exports.getDocument = async (req, res) => {
     try {
-        const document = await Document.findById(req.params.id);
+        const { data: document, error } = await supabase
+            .from('documents')
+            .select('*')
+            .eq('id', req.params.id)
+            .single();
 
-        if (!document) {
+        if (error || !document) {
             return res.status(404).json({
                 success: false,
                 message: 'Document not found'
@@ -177,7 +206,7 @@ exports.getDocument = async (req, res) => {
         }
 
         // Check ownership (unless admin)
-        if (document.user.toString() !== req.user.id && req.user.role !== 'admin') {
+        if (document.user_id !== req.user.id && req.user.role !== 'admin') {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to view this document'
@@ -202,9 +231,13 @@ exports.getDocument = async (req, res) => {
 // @access  Private
 exports.deleteDocument = async (req, res) => {
     try {
-        const document = await Document.findById(req.params.id);
+        const { data: document, error: fetchError } = await supabase
+            .from('documents')
+            .select('*')
+            .eq('id', req.params.id)
+            .single();
 
-        if (!document) {
+        if (fetchError || !document) {
             return res.status(404).json({
                 success: false,
                 message: 'Document not found'
@@ -212,7 +245,7 @@ exports.deleteDocument = async (req, res) => {
         }
 
         // Check ownership
-        if (document.user.toString() !== req.user.id && req.user.role !== 'admin') {
+        if (document.user_id !== req.user.id && req.user.role !== 'admin') {
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to delete this document'
@@ -220,11 +253,16 @@ exports.deleteDocument = async (req, res) => {
         }
 
         // Delete file from storage
-        if (fs.existsSync(document.filePath)) {
-            fs.unlinkSync(document.filePath);
+        if (fs.existsSync(document.file_path)) {
+            fs.unlinkSync(document.file_path);
         }
 
-        await document.deleteOne();
+        const { error: deleteError } = await supabase
+            .from('documents')
+            .delete()
+            .eq('id', document.id);
+
+        if (deleteError) throw deleteError;
 
         res.status(200).json({
             success: true,

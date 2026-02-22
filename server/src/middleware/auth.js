@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const supabase = require('../config/supabase');
 
 // Protect routes - verify JWT token
 exports.protect = async (req, res, next) => {
@@ -21,22 +21,28 @@ exports.protect = async (req, res, next) => {
 
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        req.user = await User.findById(decoded.id);
 
-        if (!req.user) {
+        const { data: user, error } = await supabase
+            .from('users')
+            .select('id, name, email, role, is_active')
+            .eq('id', decoded.id)
+            .single();
+
+        if (!user || error) {
             return res.status(401).json({
                 success: false,
-                message: 'User not found'
+                message: 'User no longer exists'
             });
         }
 
-        if (!req.user.isActive) {
+        if (!user.is_active) {
             return res.status(401).json({
                 success: false,
                 message: 'User account is deactivated'
             });
         }
 
+        req.user = user;
         next();
     } catch (err) {
         return res.status(401).json({

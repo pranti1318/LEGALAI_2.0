@@ -135,69 +135,75 @@ const Lawyers = () => {
     const getMockLawyers = () => [
         {
             _id: '1',
-            user: { name: 'Adv. Priya Sharma', avatar: null },
+            user: { name: 'Adv. Priya Sharma', avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=200&h=200' },
             specializations: ['Corporate Law', 'Contract Law'],
             experience: 12,
             hourlyRate: 3000,
             location: { city: 'New Delhi', state: 'Delhi' },
             rating: { average: 4.8, count: 156 },
-            bio: 'Senior corporate lawyer with expertise in mergers, acquisitions, and commercial contracts.',
-            isVerified: true
+            bio: 'Senior corporate lawyer specializing in M&A, venture capital funding, and complex commercial contracts with a decade of experience.',
+            isVerified: true,
+            availableToday: true
         },
         {
             _id: '2',
-            user: { name: 'Adv. Rajesh Kumar', avatar: null },
+            user: { name: 'Adv. Rajesh Kumar', avatar: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&q=80&w=200&h=200' },
             specializations: ['Criminal Law', 'Civil Litigation'],
             experience: 15,
             hourlyRate: 2500,
             location: { city: 'Mumbai', state: 'Maharashtra' },
             rating: { average: 4.6, count: 89 },
-            bio: 'Experienced criminal defense attorney handling complex cases across India.',
-            isVerified: true
+            bio: 'Dedicated criminal defense attorney with a track record of handling high-stakes litigation across High Courts and specialized tribunals.',
+            isVerified: true,
+            availableToday: false
         },
         {
             _id: '3',
-            user: { name: 'Adv. Ananya Gupta', avatar: null },
+            user: { name: 'Adv. Ananya Gupta', avatar: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&q=80&w=200&h=200' },
             specializations: ['Family Law', 'Real Estate'],
             experience: 8,
             hourlyRate: 2000,
             location: { city: 'Bangalore', state: 'Karnataka' },
             rating: { average: 4.9, count: 203 },
-            bio: 'Compassionate family lawyer specializing in divorce, custody, and property disputes.',
-            isVerified: true
+            bio: 'Specializing in empathetic family law mediation and property law, helping families navigate complex transitions with clarity.',
+            isVerified: true,
+            availableToday: true
         },
         {
             _id: '4',
-            user: { name: 'Adv. Vikram Singh', avatar: null },
+            user: { name: 'Adv. Vikram Singh', avatar: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=200&h=200' },
             specializations: ['Intellectual Property', 'Tax Law'],
             experience: 10,
             hourlyRate: 3500,
             location: { city: 'New Delhi', state: 'Delhi' },
             rating: { average: 4.7, count: 124 },
-            bio: 'IP specialist with experience in patents, trademarks, and copyright litigation.',
-            isVerified: true
+            bio: 'Expert in IP lifecycle management, from patent filing to trademark litigation, with a focus on tech-driven startups.',
+            isVerified: true,
+            availableToday: true
         },
         {
             _id: '5',
-            user: { name: 'Adv. Meera Patel', avatar: null },
+            user: { name: 'Adv. Meera Patel', avatar: 'https://images.unsplash.com/photo-1598550874175-4d0fe4a2c90d?auto=format&fit=crop&q=80&w=200&h=200' },
             specializations: ['Employment Law', 'Corporate Law'],
             experience: 7,
             hourlyRate: 1800,
             location: { city: 'Ahmedabad', state: 'Gujarat' },
             rating: { average: 4.5, count: 67 },
-            bio: 'Employment law expert helping businesses and employees resolve workplace disputes.',
-            isVerified: true
+            bio: 'Passionate advocate for workplace rights and corporate compliance, advising both startups and established enterprises.',
+            isVerified: true,
+            availableToday: false
         },
         {
             _id: '6',
-            user: { name: 'Adv. Arjun Reddy', avatar: null },
+            user: { name: 'Adv. Arjun Reddy', avatar: 'https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?auto=format&fit=crop&q=80&w=200&h=200' },
             specializations: ['Immigration Law'],
             experience: 9,
             hourlyRate: 2200,
             location: { city: 'Hyderabad', state: 'Telangana' },
             rating: { average: 4.8, count: 145 },
-            bio: 'Immigration attorney assisting with visas, green cards, and citizenship applications.',
-            isVerified: true
+            bio: 'Specialist in corporate relocation and residency pathways, offering clear guidance for international legal compliance.',
+            isVerified: true,
+            availableToday: true
         }
     ];
 
@@ -366,10 +372,22 @@ const Lawyers = () => {
                                     >
                                         <div className="lawyer-header">
                                             <div className="lawyer-avatar">
-                                                {lawyer.user?.name?.charAt(0).toUpperCase()}
+                                                {lawyer.user?.avatar ? (
+                                                    <img src={lawyer.user.avatar} alt={lawyer.user.name} />
+                                                ) : (
+                                                    lawyer.user?.name?.charAt(0).toUpperCase()
+                                                )}
+                                                {lawyer.availableToday && (
+                                                    <span className="availability-dot" title="Available Today"></span>
+                                                )}
                                             </div>
                                             <div className="lawyer-info">
-                                                <h3>{lawyer.user?.name}</h3>
+                                                <div className="lawyer-title-row">
+                                                    <h3>{lawyer.user?.name}</h3>
+                                                    {lawyer.availableToday && (
+                                                        <span className="availability-badge">Available Today</span>
+                                                    )}
+                                                </div>
                                                 <div className="lawyer-meta">
                                                     <span className="rating">
                                                         <Star size={14} fill="currentColor" />

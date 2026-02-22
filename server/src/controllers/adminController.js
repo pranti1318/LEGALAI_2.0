@@ -1,47 +1,45 @@
-const User = require('../models/User');
-const Lawyer = require('../models/Lawyer');
-const Document = require('../models/Document');
-const Appointment = require('../models/Appointment');
+const supabase = require('../config/supabase');
 
 // @desc    Get dashboard stats
 // @route   GET /api/admin/stats
 // @access  Private (Admin)
 exports.getDashboardStats = async (req, res) => {
     try {
-        const [
-            totalUsers,
-            totalLawyers,
-            verifiedLawyers,
-            pendingVerification,
-            totalDocuments,
-            analyzedDocuments,
-            totalAppointments,
-            completedAppointments
-        ] = await Promise.all([
-            User.countDocuments({ role: 'user' }),
-            Lawyer.countDocuments(),
-            Lawyer.countDocuments({ isVerified: true }),
-            Lawyer.countDocuments({ isVerified: false }),
-            Document.countDocuments(),
-            Document.countDocuments({ status: 'analyzed' }),
-            Appointment.countDocuments(),
-            Appointment.countDocuments({ status: 'completed' })
+        const stats = await Promise.all([
+            supabase.from('users').select('*', { count: 'exact', head: true }).eq('role', 'user'),
+            supabase.from('lawyers').select('*', { count: 'exact', head: true }),
+            supabase.from('lawyers').select('*', { count: 'exact', head: true }).eq('is_verified', true),
+            supabase.from('lawyers').select('*', { count: 'exact', head: true }).eq('is_verified', false),
+            supabase.from('documents').select('*', { count: 'exact', head: true }),
+            supabase.from('documents').select('*', { count: 'exact', head: true }).eq('status', 'analyzed'),
+            supabase.from('appointments').select('*', { count: 'exact', head: true }),
+            supabase.from('appointments').select('*', { count: 'exact', head: true }).eq('status', 'completed')
         ]);
 
-        // Recent activity
-        const recentUsers = await User.find()
-            .sort({ createdAt: -1 })
-            .limit(5)
-            .select('name email role createdAt');
+        const [
+            { count: totalUsers },
+            { count: totalLawyers },
+            { count: verifiedLawyers },
+            { count: pendingVerification },
+            { count: totalDocuments },
+            { count: analyzedDocuments },
+            { count: totalAppointments },
+            { count: completedAppointments }
+        ] = stats;
 
-        const recentAppointments = await Appointment.find()
-            .sort({ createdAt: -1 })
-            .limit(5)
-            .populate('user', 'name')
-            .populate({
-                path: 'lawyer',
-                populate: { path: 'user', select: 'name' }
-            });
+        // Recent users
+        const { data: recentUsers } = await supabase
+            .from('users')
+            .select('id, name, email, role, created_at')
+            .order('created_at', { ascending: false })
+            .limit(5);
+
+        // Recent appointments
+        const { data: recentAppointments } = await supabase
+            .from('appointments')
+            .select('*, user:users(name), lawyer:lawyers(*, user_data:users(name))')
+            .order('created_at', { ascending: false })
+            .limit(5);
 
         res.status(200).json({
             success: true,
@@ -61,17 +59,14 @@ exports.getDashboardStats = async (req, res) => {
                     completed: completedAppointments
                 },
                 recent: {
-                    users: recentUsers,
-                    appointments: recentAppointments
+                    users: recentUsers || [],
+                    appointments: recentAppointments || []
                 }
             }
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
@@ -82,32 +77,30 @@ exports.getUsers = async (req, res) => {
     try {
         const { role, isActive, page = 1, limit = 20 } = req.query;
 
-        const query = {};
-        if (role) query.role = role;
-        if (isActive !== undefined) query.isActive = isActive === 'true';
+        let query = supabase.from('users').select('*', { count: 'exact' });
 
-        const skip = (parseInt(page) - 1) * parseInt(limit);
+        if (role) query = query.eq('role', role);
+        if (isActive !== undefined) query = query.eq('is_active', isActive === 'true');
 
-        const users = await User.find(query)
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(parseInt(limit));
+        const from = (parseInt(page) - 1) * parseInt(limit);
+        const to = from + parseInt(limit) - 1;
 
-        const total = await User.countDocuments(query);
+        const { data: users, error, count } = await query
+            .order('created_at', { ascending: false })
+            .range(from, to);
+
+        if (error) throw error;
 
         res.status(200).json({
             success: true,
             count: users.length,
-            total,
-            totalPages: Math.ceil(total / parseInt(limit)),
+            total: count,
+            totalPages: Math.ceil((count || 0) / parseInt(limit)),
             data: users
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
@@ -118,19 +111,16 @@ exports.updateUser = async (req, res) => {
     try {
         const { isActive, role } = req.body;
 
-        const user = await User.findById(req.params.id);
+        const { data: user, error } = await supabase
+            .from('users')
+            .update({ is_active: isActive, role })
+            .eq('id', req.params.id)
+            .select()
+            .single();
 
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                message: 'User not found'
-            });
+        if (error || !user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
         }
-
-        if (isActive !== undefined) user.isActive = isActive;
-        if (role) user.role = role;
-
-        await user.save();
 
         res.status(200).json({
             success: true,
@@ -138,10 +128,7 @@ exports.updateUser = async (req, res) => {
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
@@ -150,9 +137,13 @@ exports.updateUser = async (req, res) => {
 // @access  Private (Admin)
 exports.getPendingLawyers = async (req, res) => {
     try {
-        const lawyers = await Lawyer.find({ isVerified: false })
-            .populate('user', 'name email phone createdAt')
-            .sort({ createdAt: 1 });
+        const { data: lawyers, error } = await supabase
+            .from('lawyers')
+            .select('*, user:users(name, email, phone, created_at)')
+            .eq('is_verified', false)
+            .order('created_at', { ascending: true });
+
+        if (error) throw error;
 
         res.status(200).json({
             success: true,
@@ -161,10 +152,7 @@ exports.getPendingLawyers = async (req, res) => {
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
@@ -173,39 +161,33 @@ exports.getPendingLawyers = async (req, res) => {
 // @access  Private (Admin)
 exports.verifyLawyer = async (req, res) => {
     try {
-        const { approved, rejectionReason } = req.body;
+        const { approved } = req.body;
 
-        const lawyer = await Lawyer.findById(req.params.id);
+        const updates = {
+            is_verified: approved,
+            verified_at: approved ? new Date() : null,
+            verified_by: approved ? req.user.id : null
+        };
 
-        if (!lawyer) {
-            return res.status(404).json({
-                success: false,
-                message: 'Lawyer not found'
-            });
+        const { data: lawyer, error } = await supabase
+            .from('lawyers')
+            .update(updates)
+            .eq('id', req.params.id)
+            .select()
+            .single();
+
+        if (error || !lawyer) {
+            return res.status(404).json({ success: false, message: 'Lawyer not found' });
         }
-
-        if (approved) {
-            lawyer.isVerified = true;
-            lawyer.verifiedAt = new Date();
-            lawyer.verifiedBy = req.user.id;
-        } else {
-            // Could also delete or mark as rejected
-            lawyer.isVerified = false;
-        }
-
-        await lawyer.save();
 
         res.status(200).json({
             success: true,
-            message: approved ? 'Lawyer verified successfully' : 'Lawyer verification rejected',
+            message: approved ? 'Lawyer verified successfully' : 'Lawyer verification updated',
             data: lawyer
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
@@ -216,31 +198,28 @@ exports.getAllLawyers = async (req, res) => {
     try {
         const { isVerified, page = 1, limit = 20 } = req.query;
 
-        const query = {};
-        if (isVerified !== undefined) query.isVerified = isVerified === 'true';
+        let query = supabase.from('lawyers').select('*, user:users(name, email, phone, is_active)', { count: 'exact' });
 
-        const skip = (parseInt(page) - 1) * parseInt(limit);
+        if (isVerified !== undefined) query = query.eq('is_verified', isVerified === 'true');
 
-        const lawyers = await Lawyer.find(query)
-            .populate('user', 'name email phone isActive')
-            .sort({ createdAt: -1 })
-            .skip(skip)
-            .limit(parseInt(limit));
+        const from = (parseInt(page) - 1) * parseInt(limit);
+        const to = from + parseInt(limit) - 1;
 
-        const total = await Lawyer.countDocuments(query);
+        const { data: lawyers, error, count } = await query
+            .order('created_at', { ascending: false })
+            .range(from, to);
+
+        if (error) throw error;
 
         res.status(200).json({
             success: true,
             count: lawyers.length,
-            total,
-            totalPages: Math.ceil(total / parseInt(limit)),
+            total: count,
+            totalPages: Math.ceil((count || 0) / parseInt(limit)),
             data: lawyers
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };

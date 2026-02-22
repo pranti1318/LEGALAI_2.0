@@ -13,7 +13,9 @@ import {
     MessageSquare,
     Star,
     Zap,
-    Lock
+    Lock,
+    Quote,
+    Check
 } from 'lucide-react';
 import './Home.css';
 
@@ -72,14 +74,14 @@ const Home = () => {
                         </span>
 
                         <h1>
-                            Understand Your Legal Documents with{' '}
-                            <span className="text-gradient">AI Precision</span>
+                            Navigate Legal Complexity with{' '}
+                            <span className="text-gradient">Human Insight</span>
                         </h1>
 
                         <p className="hero-description">
-                            Upload any legal document and get instant AI-powered analysis.
-                            Identify risks, understand clauses, and connect with verified lawyers
-                            for expert guidance.
+                            Don't just sign. Understand. Our AI-powered platform provides 
+                            the clarity you need to move forward with confidence, backed 
+                            by a global network of verified legal experts.
                         </p>
 
                         <div className="hero-cta">
@@ -172,6 +174,20 @@ const Home = () => {
                 </div>
             </section>
 
+            {/* Trusted By Section */}
+            <section className="trusted-by">
+                <div className="container">
+                    <p className="trusted-label">Trusted by innovative legal firms and 10,000+ individuals</p>
+                    <div className="logo-grid">
+                        <div className="logo-item">LEXINGTON</div>
+                        <div className="logo-item">JUSTICE CO.</div>
+                        <div className="logo-item">GLOBAL LAW</div>
+                        <div className="logo-item">PRIME LEGAL</div>
+                        <div className="logo-item">MODERN ADVOCATES</div>
+                    </div>
+                </div>
+            </section>
+
             {/* How It Works */}
             <section className="how-it-works">
                 <div className="container">
@@ -181,8 +197,8 @@ const Home = () => {
                         whileInView={{ opacity: 1, y: 0 }}
                         viewport={{ once: true }}
                     >
-                        <h2>How It Works</h2>
-                        <p>Get legal clarity in three simple steps</p>
+                        <h2>Clarity in Three Simple Steps</h2>
+                        <p>We’ve simplified the complex world of legal documentation.</p>
                     </motion.div>
 
                     <div className="features-grid">
@@ -205,6 +221,82 @@ const Home = () => {
                 </div>
             </section>
 
+            {/* Testimonials Section */}
+            <section className="testimonials">
+                <div className="container">
+                    <motion.div
+                        className="section-header"
+                        initial={{ opacity: 0, y: 20 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true }}
+                    >
+                        <h2>Real Stories from Our Community</h2>
+                        <p>Join thousands who have found peace of mind with LegalAI.</p>
+                    </motion.div>
+
+                    <div className="testimonials-grid">
+                        <motion.div 
+                            className="testimonial-card"
+                            initial={{ opacity: 0, y: 20 }}
+                            whileInView={{ opacity: 1, y: 0 }}
+                            viewport={{ once: true }}
+                        >
+                            <Quote className="quote-icon" size={32} />
+                            <p className="testimonial-text">
+                                "LegalAI saved me from a predatory employment contract. The AI flagged a non-compete clause I would have otherwise missed. Truly life-changing."
+                            </p>
+                            <div className="testimonial-author">
+                                <img src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&q=80&w=100&h=100" alt="Sarah J." />
+                                <div>
+                                    <strong>Sarah Jenkins</strong>
+                                    <span>Software Engineer</span>
+                                </div>
+                            </div>
+                        </motion.div>
+
+                        <motion.div 
+                            className="testimonial-card"
+                            initial={{ opacity: 0, y: 20 }}
+                            whileInView={{ opacity: 1, y: 0 }}
+                            viewport={{ once: true }}
+                            transition={{ delay: 0.1 }}
+                        >
+                            <Quote className="quote-icon" size={32} />
+                            <p className="testimonial-text">
+                                "As a small business owner, legal fees were always a barrier. LegalAI gives me the confidence to review basic contracts before heading to my lawyer."
+                            </p>
+                            <div className="testimonial-author">
+                                <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?auto=format&fit=crop&q=80&w=100&h=100" alt="David M." />
+                                <div>
+                                    <strong>David Miller</strong>
+                                    <span>Business Owner</span>
+                                </div>
+                            </div>
+                        </motion.div>
+
+                        <motion.div 
+                            className="testimonial-card"
+                            initial={{ opacity: 0, y: 20 }}
+                            whileInView={{ opacity: 1, y: 0 }}
+                            viewport={{ once: true }}
+                            transition={{ delay: 0.2 }}
+                        >
+                            <Quote className="quote-icon" size={32} />
+                            <p className="testimonial-text">
+                                "The speed is incredible. I uploaded my rental agreement and had a full risk report in under 30 seconds. Highly recommend."
+                            </p>
+                            <div className="testimonial-author">
+                                <img src="https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=100&h=100" alt="Elena R." />
+                                <div>
+                                    <strong>Elena Rodriguez</strong>
+                                    <span>Freelance Designer</span>
+                                </div>
+                            </div>
+                        </motion.div>
+                    </div>
+                </div>
+            </section>
+
             {/* CTA Section */}
             <section className="cta-section">
                 <div className="container">
@@ -215,17 +307,17 @@ const Home = () => {
                         viewport={{ once: true }}
                     >
                         <div className="cta-content">
-                            <h2>Ready to Understand Your Legal Documents?</h2>
+                            <h2>Navigate Your Future with Confidence</h2>
                             <p>
-                                Join thousands of users who trust LegalAI for document analysis
-                                and lawyer consultations.
+                                Join the community of people taking control of their legal journey.
+                                Start your first analysis today.
                             </p>
                             <div className="cta-buttons">
                                 <Link to="/register" className="btn btn-primary btn-lg">
                                     Get Started Free
                                 </Link>
                                 <Link to="/about" className="btn btn-secondary btn-lg">
-                                    Learn More
+                                    How it Works
                                 </Link>
                             </div>
                         </div>

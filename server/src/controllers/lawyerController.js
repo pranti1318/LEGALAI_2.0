@@ -1,6 +1,4 @@
-const Lawyer = require('../models/Lawyer');
-const User = require('../models/User');
-const Review = require('../models/Review');
+const supabase = require('../config/supabase');
 const geoapifyMapsService = require('../services/googleMapsService');
 
 // @desc    Get all verified lawyers (with filters)
@@ -16,111 +14,63 @@ exports.getLawyers = async (req, res) => {
             minExperience,
             page = 1,
             limit = 10,
-            sortBy = 'rating.average',
+            sortBy = 'rating_average',
             order = 'desc'
         } = req.query;
 
-        // Build query
-        const query = { isVerified: true };
+        // Build Supabase query
+        let query = supabase
+            .from('lawyers')
+            .select('*, user:users(name, email, avatar)')
+            .eq('is_verified', true);
 
         if (specialization) {
-            query.specializations = { $in: [specialization] };
+            query = query.contains('specializations', [specialization]);
         }
 
         if (city) {
-            query['location.city'] = { $regex: city, $options: 'i' };
+            query = query.ilike('location_city', `%${city}%`);
         }
 
         if (minRating) {
-            query['rating.average'] = { $gte: parseFloat(minRating) };
+            query = query.gte('rating_average', parseFloat(minRating));
         }
 
         if (maxRate) {
-            query.hourlyRate = { $lte: parseFloat(maxRate) };
+            query = query.lte('hourly_rate', parseFloat(maxRate));
         }
 
         if (minExperience) {
-            query.experience = { $gte: parseInt(minExperience) };
+            query = query.gte('experience', parseInt(minExperience));
         }
 
-        // Geospatial search - support both coordinates and city name
-        let { lat, lng, radius = 50 } = req.query; // radius in km
+        const from = (parseInt(page) - 1) * parseInt(limit);
+        const to = from + parseInt(limit) - 1;
+
+        const { data: dbLawyers, error, count } = await query
+            .order(sortBy, { ascending: order === 'asc' })
+            .range(from, to);
+
+        if (error) throw error;
+
+        // External Geoapify search if lat/lng present
+        let { lat, lng, radius = 50 } = req.query;
         let geoapifyResults = [];
 
-        // If city is provided but no coordinates, geocode the city first
-        if (city && !lat && !lng) {
-            try {
-                console.log(`🏙️ City search requested: ${city}`);
-                const geocoded = await geoapifyMapsService.geocodeCity(city);
-                if (geocoded) {
-                    lat = geocoded.lat;
-                    lng = geocoded.lng;
-                    console.log(`✅ Using geocoded coordinates for ${city}: ${lat}, ${lng}`);
-                } else {
-                    console.warn(`⚠️ Could not geocode city: ${city}`);
-                }
-            } catch (err) {
-                console.error('Geocoding error:', err);
-            }
-        }
-
         if (lat && lng) {
-            query['location.coordinates'] = {
-                $near: {
-                    $geometry: {
-                        type: 'Point',
-                        coordinates: [parseFloat(lng), parseFloat(lat)]
-                    },
-                    $maxDistance: parseFloat(radius) * 1000 // Convert to meters
-                }
-            };
-
-            // Fetch from Geoapify
             try {
                 geoapifyResults = await geoapifyMapsService.findLawyersNearby(lat, lng, parseFloat(radius) * 1000);
-                console.log(`📍 Found ${geoapifyResults.length} lawyers from Geoapify near ${city || 'coordinates'}`);
             } catch (err) {
                 console.error('Geoapify fetch failed:', err);
             }
-        } else if (city) {
-            // If we have city but geocoding failed, still try database search by city name
-            query['location.city'] = new RegExp(city, 'i');
-            console.log(`🔍 Searching database by city name: ${city}`);
         }
 
-        const skip = (parseInt(page) - 1) * parseInt(limit);
-        const sortOrder = order === 'asc' ? 1 : -1;
-
-        let dbLawyers = [];
-        let total = 0;
-
-        // Only query database if MongoDB is connected
-        const mongoose = require('mongoose');
-        if (mongoose.connection.readyState === 1) {
-            try {
-                dbLawyers = await Lawyer.find(query)
-                    .populate('user', 'name email avatar')
-                    .sort({ [sortBy]: sortOrder })
-                    .skip(skip)
-                    .limit(parseInt(limit));
-
-                total = await Lawyer.countDocuments(query);
-            } catch (dbError) {
-                console.error('Database query error:', dbError.message);
-                // Continue with empty results from database
-            }
-        } else {
-            console.warn('⚠️  MongoDB not connected, skipping database query');
-        }
-
-        // Merge results (DB results first, then Geoapify results)
-        // Only add Geoapify results if we're on the first page to avoid duplication/pagination issues logic for now
-        let allLawyers = dbLawyers;
+        let allLawyers = dbLawyers || [];
         if (parseInt(page) === 1) {
-            allLawyers = [...dbLawyers, ...geoapifyResults];
+            allLawyers = [...allLawyers, ...geoapifyResults];
         }
 
-        const combinedTotal = total + geoapifyResults.length;
+        const combinedTotal = (count || 0) + geoapifyResults.length;
 
         res.status(200).json({
             success: true,
@@ -132,10 +82,7 @@ exports.getLawyers = async (req, res) => {
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error fetching lawyers'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
@@ -144,35 +91,34 @@ exports.getLawyers = async (req, res) => {
 // @access  Public
 exports.getLawyer = async (req, res) => {
     try {
-        const lawyer = await Lawyer.findById(req.params.id)
-            .populate('user', 'name email avatar phone');
+        const { data: lawyer, error } = await supabase
+            .from('lawyers')
+            .select('*, user:users(name, email, avatar, phone)')
+            .eq('id', req.params.id)
+            .single();
 
-        if (!lawyer) {
-            return res.status(404).json({
-                success: false,
-                message: 'Lawyer not found'
-            });
+        if (!lawyer || error) {
+            return res.status(404).json({ success: false, message: 'Lawyer not found' });
         }
 
         // Get reviews
-        const reviews = await Review.find({ lawyer: lawyer._id })
-            .populate('user', 'name avatar')
-            .sort({ createdAt: -1 })
+        const { data: reviews } = await supabase
+            .from('reviews')
+            .select('*, user:users(name, avatar)')
+            .eq('lawyer_id', lawyer.id)
+            .order('created_at', { ascending: false })
             .limit(10);
 
         res.status(200).json({
             success: true,
             data: {
-                ...lawyer.toObject(),
-                reviews
+                ...lawyer,
+                reviews: reviews || []
             }
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
@@ -181,33 +127,34 @@ exports.getLawyer = async (req, res) => {
 // @access  Private (Lawyer only)
 exports.updateProfile = async (req, res) => {
     try {
-        const lawyer = await Lawyer.findOne({ user: req.user.id });
-
-        if (!lawyer) {
-            return res.status(404).json({
-                success: false,
-                message: 'Lawyer profile not found'
-            });
-        }
-
+        const updates = {};
         const allowedUpdates = [
             'specializations',
-            'barNumber',
+            'bar_number',
             'experience',
             'bio',
             'education',
-            'hourlyRate',
+            'hourly_rate',
             'languages',
-            'location'
+            'location_city',
+            'location_state',
+            'location_address'
         ];
 
         allowedUpdates.forEach(field => {
             if (req.body[field] !== undefined) {
-                lawyer[field] = req.body[field];
+                updates[field] = req.body[field];
             }
         });
 
-        await lawyer.save();
+        const { data: lawyer, error } = await supabase
+            .from('lawyers')
+            .update(updates)
+            .eq('user_id', req.user.id)
+            .select()
+            .single();
+
+        if (error) throw error;
 
         res.status(200).json({
             success: true,
@@ -215,10 +162,7 @@ exports.updateProfile = async (req, res) => {
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
@@ -227,17 +171,14 @@ exports.updateProfile = async (req, res) => {
 // @access  Private (Lawyer only)
 exports.updateAvailability = async (req, res) => {
     try {
-        const lawyer = await Lawyer.findOne({ user: req.user.id });
+        const { data: lawyer, error } = await supabase
+            .from('lawyers')
+            .update({ availability: req.body.availability })
+            .eq('user_id', req.user.id)
+            .select('availability')
+            .single();
 
-        if (!lawyer) {
-            return res.status(404).json({
-                success: false,
-                message: 'Lawyer profile not found'
-            });
-        }
-
-        lawyer.availability = req.body.availability;
-        await lawyer.save();
+        if (error) throw error;
 
         res.status(200).json({
             success: true,
@@ -245,10 +186,7 @@ exports.updateAvailability = async (req, res) => {
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
@@ -257,14 +195,14 @@ exports.updateAvailability = async (req, res) => {
 // @access  Private (Lawyer only)
 exports.getMyProfile = async (req, res) => {
     try {
-        const lawyer = await Lawyer.findOne({ user: req.user.id })
-            .populate('user', 'name email avatar phone');
+        const { data: lawyer, error } = await supabase
+            .from('lawyers')
+            .select('*, user:users(name, email, avatar, phone)')
+            .eq('user_id', req.user.id)
+            .single();
 
-        if (!lawyer) {
-            return res.status(404).json({
-                success: false,
-                message: 'Lawyer profile not found'
-            });
+        if (!lawyer || error) {
+            return res.status(404).json({ success: false, message: 'Lawyer profile not found' });
         }
 
         res.status(200).json({
@@ -273,10 +211,7 @@ exports.getMyProfile = async (req, res) => {
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 

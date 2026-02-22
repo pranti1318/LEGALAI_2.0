@@ -1,69 +1,43 @@
-const Appointment = require('../models/Appointment');
-const Lawyer = require('../models/Lawyer');
-const Document = require('../models/Document');
+const supabase = require('../config/supabase');
 
 // @desc    Create appointment
 // @route   POST /api/appointments
 // @access  Private (User)
 exports.createAppointment = async (req, res) => {
     try {
-        const { lawyerId, documentId, scheduledDate, timeSlot, type, purpose } = req.body;
+        const { lawyerId, documentId, scheduledDate, timeSlot, purpose, amount } = req.body;
 
         // Verify lawyer exists and is verified
-        const lawyer = await Lawyer.findById(lawyerId);
-        if (!lawyer) {
-            return res.status(404).json({
-                success: false,
-                message: 'Lawyer not found'
-            });
+        const { data: lawyer, error: lawyerError } = await supabase
+            .from('lawyers')
+            .select('id, is_verified, hourly_rate')
+            .eq('id', lawyerId)
+            .single();
+
+        if (lawyerError || !lawyer) {
+            return res.status(404).json({ success: false, message: 'Lawyer not found' });
         }
 
-        if (!lawyer.isVerified) {
-            return res.status(400).json({
-                success: false,
-                message: 'Cannot book appointment with unverified lawyer'
-            });
+        if (!lawyer.is_verified) {
+            return res.status(400).json({ success: false, message: 'Cannot book appointment with unverified lawyer' });
         }
 
-        // Verify document if provided
-        if (documentId) {
-            const document = await Document.findById(documentId);
-            if (!document || document.user.toString() !== req.user.id) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Invalid document'
-                });
-            }
-        }
+        // Create appointment record
+        const { data: appointment, error } = await supabase
+            .from('appointments')
+            .insert([{
+                user_id: req.user.id,
+                lawyer_id: lawyerId,
+                date: scheduledDate,
+                time_slot: typeof timeSlot === 'object' ? JSON.stringify(timeSlot) : timeSlot,
+                purpose,
+                amount: amount || lawyer.hourly_rate,
+                status: 'scheduled'
+            }])
+            .select()
+            .single();
 
-        // Check for conflicting appointments
-        const existingAppointment = await Appointment.findOne({
-            lawyer: lawyerId,
-            scheduledDate: new Date(scheduledDate),
-            'timeSlot.startTime': timeSlot.startTime,
-            status: { $in: ['pending', 'confirmed'] }
-        });
-
-        if (existingAppointment) {
-            return res.status(400).json({
-                success: false,
-                message: 'This time slot is already booked'
-            });
-        }
-
-        const appointment = await Appointment.create({
-            user: req.user.id,
-            lawyer: lawyerId,
-            document: documentId,
-            scheduledDate: new Date(scheduledDate),
-            timeSlot,
-            type: type || 'online',
-            purpose,
-            fee: {
-                amount: lawyer.hourlyRate,
-                currency: 'INR'
-            }
-        });
+        if (error) throw error;
 
         res.status(201).json({
             success: true,
@@ -71,10 +45,7 @@ exports.createAppointment = async (req, res) => {
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: 'Error creating appointment'
-        });
+        res.status(500).json({ success: false, message: 'Error creating appointment' });
     }
 };
 
@@ -85,55 +56,49 @@ exports.getAppointments = async (req, res) => {
     try {
         const { status, upcoming, page = 1, limit = 10 } = req.query;
 
-        let query = {};
+        let query = supabase
+            .from('appointments')
+            .select('*, user:users(name, email, avatar), lawyer:lawyers(*, user_user:users(name, email, avatar))');
 
-        // Different queries for user vs lawyer
+        // Filter based on role
         if (req.user.role === 'lawyer') {
-            const lawyer = await Lawyer.findOne({ user: req.user.id });
-            if (lawyer) {
-                query.lawyer = lawyer._id;
-            }
+            const { data: lawyer } = await supabase
+                .from('lawyers')
+                .select('id')
+                .eq('user_id', req.user.id)
+                .single();
+
+            if (lawyer) query = query.eq('lawyer_id', lawyer.id);
         } else {
-            query.user = req.user.id;
+            query = query.eq('user_id', req.user.id);
         }
 
-        if (status) {
-            query.status = status;
-        }
+        if (status) query = query.eq('status', status);
 
         if (upcoming === 'true') {
-            query.scheduledDate = { $gte: new Date() };
-            query.status = { $in: ['pending', 'confirmed'] };
+            query = query.gte('date', new Date().toISOString().split('T')[0]);
+            query = query.in('status', ['scheduled', 'pending']);
         }
 
-        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const from = (parseInt(page) - 1) * parseInt(limit);
+        const to = from + parseInt(limit) - 1;
 
-        const appointments = await Appointment.find(query)
-            .populate('user', 'name email avatar')
-            .populate({
-                path: 'lawyer',
-                populate: { path: 'user', select: 'name email avatar' }
-            })
-            .populate('document', 'originalName status')
-            .sort({ scheduledDate: -1 })
-            .skip(skip)
-            .limit(parseInt(limit));
+        const { data: appointments, error, count } = await query
+            .order('date', { ascending: false })
+            .range(from, to);
 
-        const total = await Appointment.countDocuments(query);
+        if (error) throw error;
 
         res.status(200).json({
             success: true,
             count: appointments.length,
-            total,
-            totalPages: Math.ceil(total / parseInt(limit)),
+            total: count,
+            totalPages: Math.ceil((count || 0) / parseInt(limit)),
             data: appointments
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
@@ -142,32 +107,29 @@ exports.getAppointments = async (req, res) => {
 // @access  Private
 exports.getAppointment = async (req, res) => {
     try {
-        const appointment = await Appointment.findById(req.params.id)
-            .populate('user', 'name email avatar phone')
-            .populate({
-                path: 'lawyer',
-                populate: { path: 'user', select: 'name email avatar phone' }
-            })
-            .populate('document');
+        const { data: appointment, error } = await supabase
+            .from('appointments')
+            .select('*, user:users(name, email, avatar, phone), lawyer:lawyers(*, lawyer_user:users(name, email, avatar, phone))')
+            .eq('id', req.params.id)
+            .single();
 
-        if (!appointment) {
-            return res.status(404).json({
-                success: false,
-                message: 'Appointment not found'
-            });
+        if (error || !appointment) {
+            return res.status(404).json({ success: false, message: 'Appointment not found' });
         }
 
-        // Check authorization
-        const lawyer = await Lawyer.findOne({ user: req.user.id });
-        const isLawyer = lawyer && appointment.lawyer._id.toString() === lawyer._id.toString();
-        const isUser = appointment.user._id.toString() === req.user.id;
+        // Authorization check
+        const { data: lawyer } = await supabase
+            .from('lawyers')
+            .select('id')
+            .eq('user_id', req.user.id)
+            .single();
+
+        const isLawyer = lawyer && appointment.lawyer_id === lawyer.id;
+        const isUser = appointment.user_id === req.user.id;
         const isAdmin = req.user.role === 'admin';
 
         if (!isUser && !isLawyer && !isAdmin) {
-            return res.status(403).json({
-                success: false,
-                message: 'Not authorized to view this appointment'
-            });
+            return res.status(403).json({ success: false, message: 'Not authorized' });
         }
 
         res.status(200).json({
@@ -176,10 +138,7 @@ exports.getAppointment = async (req, res) => {
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
@@ -190,34 +149,34 @@ exports.updateAppointmentStatus = async (req, res) => {
     try {
         const { status, meetingLink, notes } = req.body;
 
-        const appointment = await Appointment.findById(req.params.id);
+        const { data: lawyer } = await supabase
+            .from('lawyers')
+            .select('id')
+            .eq('user_id', req.user.id)
+            .single();
 
-        if (!appointment) {
-            return res.status(404).json({
-                success: false,
-                message: 'Appointment not found'
-            });
+        if (!lawyer) {
+            return res.status(403).json({ success: false, message: 'Not authorized' });
         }
 
-        // Verify lawyer ownership
-        const lawyer = await Lawyer.findOne({ user: req.user.id });
-        if (!lawyer || appointment.lawyer.toString() !== lawyer._id.toString()) {
-            return res.status(403).json({
-                success: false,
-                message: 'Not authorized to update this appointment'
-            });
+        const { data: appointment, error } = await supabase
+            .from('appointments')
+            .update({
+                status,
+                meeting_link: meetingLink,
+                notes: notes
+            })
+            .match({ id: req.params.id, lawyer_id: lawyer.id })
+            .select()
+            .single();
+
+        if (error || !appointment) {
+            return res.status(404).json({ success: false, message: 'Appointment not found or not owned by you' });
         }
 
-        if (status) appointment.status = status;
-        if (meetingLink) appointment.meetingLink = meetingLink;
-        if (notes) appointment.notes.lawyerNotes = notes;
-
-        await appointment.save();
-
-        // Update lawyer consultation count if completed
+        // Increment consultation count if completed
         if (status === 'completed') {
-            lawyer.consultationCount += 1;
-            await lawyer.save();
+            await supabase.rpc('increment_consultation_count', { lawyer_id_input: lawyer.id });
         }
 
         res.status(200).json({
@@ -226,10 +185,7 @@ exports.updateAppointmentStatus = async (req, res) => {
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };
 
@@ -238,51 +194,44 @@ exports.updateAppointmentStatus = async (req, res) => {
 // @access  Private
 exports.cancelAppointment = async (req, res) => {
     try {
-        const { reason } = req.body;
+        const { data: appointment, error: fetchError } = await supabase
+            .from('appointments')
+            .select('id, user_id, lawyer_id, status')
+            .eq('id', req.params.id)
+            .single();
 
-        const appointment = await Appointment.findById(req.params.id);
-
-        if (!appointment) {
-            return res.status(404).json({
-                success: false,
-                message: 'Appointment not found'
-            });
+        if (fetchError || !appointment) {
+            return res.status(404).json({ success: false, message: 'Appointment not found' });
         }
 
-        // Check authorization
-        const lawyer = await Lawyer.findOne({ user: req.user.id });
-        const isLawyer = lawyer && appointment.lawyer.toString() === lawyer._id.toString();
-        const isUser = appointment.user.toString() === req.user.id;
+        const { data: lawyer } = await supabase
+            .from('lawyers')
+            .select('id')
+            .eq('user_id', req.user.id)
+            .single();
+
+        const isLawyer = lawyer && appointment.lawyer_id === lawyer.id;
+        const isUser = appointment.user_id === req.user.id;
 
         if (!isUser && !isLawyer) {
-            return res.status(403).json({
-                success: false,
-                message: 'Not authorized to cancel this appointment'
-            });
+            return res.status(403).json({ success: false, message: 'Not authorized' });
         }
 
-        if (['completed', 'cancelled'].includes(appointment.status)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Cannot cancel this appointment'
-            });
-        }
+        const { data: canceledApp, error } = await supabase
+            .from('appointments')
+            .update({ status: 'cancelled' })
+            .eq('id', req.params.id)
+            .select()
+            .single();
 
-        appointment.status = 'cancelled';
-        appointment.cancelledBy = req.user.id;
-        appointment.cancelReason = reason;
-
-        await appointment.save();
+        if (error) throw error;
 
         res.status(200).json({
             success: true,
-            data: appointment
+            data: canceledApp
         });
     } catch (error) {
         console.error(error);
-        res.status(500).json({
-            success: false,
-            message: 'Server error'
-        });
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 };

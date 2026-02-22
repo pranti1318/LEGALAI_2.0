@@ -1,8 +1,11 @@
-const User = require('../models/User');
-const Lawyer = require('../models/Lawyer');
+const supabase = require('../config/supabase');
 const { generateToken } = require('../middleware/auth');
 const { validationResult } = require('express-validator');
+const bcrypt = require('bcryptjs');
 
+// @desc    Register user
+// @route   POST /api/auth/register
+// @access  Public
 exports.register = async (req, res) => {
     try {
         const errors = validationResult(req);
@@ -12,37 +15,13 @@ exports.register = async (req, res) => {
 
         const { name, email, password, role, phone } = req.body;
 
-        // Check if MongoDB is connected
-        const mongoose = require('mongoose');
-        if (mongoose.connection.readyState !== 1) {
-            console.warn('⚠️  MongoDB not connected, using mock registration');
-
-            // Mock registration for testing without database
-            const mockUser = {
-                _id: 'mock_' + Date.now(),
-                name,
-                email,
-                role: role || 'user',
-                phone
-            };
-
-            const token = generateToken(mockUser._id);
-
-            return res.status(201).json({
-                success: true,
-                token,
-                user: {
-                    id: mockUser._id,
-                    name: mockUser.name,
-                    email: mockUser.email,
-                    role: mockUser.role
-                },
-                message: 'Mock registration successful (database not connected)'
-            });
-        }
-
         // Check if user exists
-        const existingUser = await User.findOne({ email });
+        const { data: existingUser } = await supabase
+            .from('users')
+            .select('id')
+            .eq('email', email)
+            .single();
+
         if (existingUser) {
             return res.status(400).json({
                 success: false,
@@ -50,47 +29,49 @@ exports.register = async (req, res) => {
             });
         }
 
+        // Hash password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
         // Create user
-        const user = await User.create({
-            name,
-            email,
-            password,
-            role: role || 'user',
-            phone
-        });
+        const { data: user, error: userError } = await supabase
+            .from('users')
+            .insert([{
+                name,
+                email,
+                password: hashedPassword,
+                role: role || 'user',
+                phone
+            }])
+            .select()
+            .single();
+
+        if (userError) throw userError;
 
         // If registering as lawyer, create lawyer profile
         if (role === 'lawyer') {
-            try {
-                await Lawyer.create({
-                    user: user._id,
+            const { error: lawyerError } = await supabase
+                .from('lawyers')
+                .insert([{
+                    user_id: user.id,
                     specializations: [],
-                    barNumber: 'PENDING',
+                    bar_number: 'PENDING',
                     experience: 0,
-                    hourlyRate: 0,
-                    location: {
-                        city: '',
-                        state: '',
-                        address: '',
-                        coordinates: {
-                            type: 'Point',
-                            coordinates: [0, 0]
-                        }
-                    }
-                });
-            } catch (lawyerError) {
+                    hourly_rate: 0
+                }]);
+
+            if (lawyerError) {
                 console.error('Error creating lawyer profile:', lawyerError);
-                // Continue even if lawyer profile creation fails
             }
         }
 
-        const token = generateToken(user._id);
+        const token = generateToken(user.id);
 
         res.status(201).json({
             success: true,
             token,
             user: {
-                id: user._id,
+                id: user.id,
                 name: user.name,
                 email: user.email,
                 role: user.role
@@ -98,22 +79,6 @@ exports.register = async (req, res) => {
         });
     } catch (error) {
         console.error('Registration error:', error);
-
-        // Provide specific error messages
-        if (error.name === 'ValidationError') {
-            return res.status(400).json({
-                success: false,
-                message: 'Validation error: ' + Object.values(error.errors).map(e => e.message).join(', ')
-            });
-        }
-
-        if (error.code === 11000) {
-            return res.status(400).json({
-                success: false,
-                message: 'Email already registered'
-            });
-        }
-
         res.status(500).json({
             success: false,
             message: error.message || 'Server error during registration'
@@ -128,7 +93,6 @@ exports.login = async (req, res) => {
     try {
         const { email, password } = req.body;
 
-        // Validate email & password
         if (!email || !password) {
             return res.status(400).json({
                 success: false,
@@ -137,9 +101,13 @@ exports.login = async (req, res) => {
         }
 
         // Check for user
-        const user = await User.findOne({ email }).select('+password');
+        const { data: user, error } = await supabase
+            .from('users')
+            .select('*')
+            .eq('email', email)
+            .single();
 
-        if (!user) {
+        if (!user || error) {
             return res.status(401).json({
                 success: false,
                 message: 'Invalid credentials'
@@ -147,7 +115,7 @@ exports.login = async (req, res) => {
         }
 
         // Check if password matches
-        const isMatch = await user.matchPassword(password);
+        const isMatch = await bcrypt.compare(password, user.password);
 
         if (!isMatch) {
             return res.status(401).json({
@@ -156,32 +124,37 @@ exports.login = async (req, res) => {
             });
         }
 
-        if (!user.isActive) {
+        if (!user.is_active) {
             return res.status(401).json({
                 success: false,
                 message: 'Account is deactivated. Please contact support.'
             });
         }
 
-        const token = generateToken(user._id);
+        const token = generateToken(user.id);
 
         // Get lawyer profile if user is a lawyer
         let lawyerProfile = null;
         if (user.role === 'lawyer') {
-            lawyerProfile = await Lawyer.findOne({ user: user._id });
+            const { data: profile } = await supabase
+                .from('lawyers')
+                .select('id, is_verified')
+                .eq('user_id', user.id)
+                .single();
+            lawyerProfile = profile;
         }
 
         res.status(200).json({
             success: true,
             token,
             user: {
-                id: user._id,
+                id: user.id,
                 name: user.name,
                 email: user.email,
                 role: user.role,
                 lawyerProfile: lawyerProfile ? {
-                    id: lawyerProfile._id,
-                    isVerified: lawyerProfile.isVerified
+                    id: lawyerProfile.id,
+                    isVerified: lawyerProfile.is_verified
                 } : null
             }
         });
@@ -199,17 +172,32 @@ exports.login = async (req, res) => {
 // @access  Private
 exports.getMe = async (req, res) => {
     try {
-        const user = await User.findById(req.user.id);
+        const { data: user, error } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', req.user.id)
+            .single();
+
+        if (error || !user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        delete user.password; // Security
 
         let lawyerProfile = null;
         if (user.role === 'lawyer') {
-            lawyerProfile = await Lawyer.findOne({ user: user._id });
+            const { data: profile } = await supabase
+                .from('lawyers')
+                .select('*')
+                .eq('user_id', user.id)
+                .single();
+            lawyerProfile = profile;
         }
 
         res.status(200).json({
             success: true,
             data: {
-                ...user.toObject(),
+                ...user,
                 lawyerProfile
             }
         });
@@ -227,20 +215,16 @@ exports.getMe = async (req, res) => {
 // @access  Private
 exports.updateDetails = async (req, res) => {
     try {
-        const fieldsToUpdate = {
-            name: req.body.name,
-            phone: req.body.phone
-        };
+        const { name, phone } = req.body;
 
-        // Remove undefined fields
-        Object.keys(fieldsToUpdate).forEach(
-            key => fieldsToUpdate[key] === undefined && delete fieldsToUpdate[key]
-        );
+        const { data: user, error } = await supabase
+            .from('users')
+            .update({ name, phone })
+            .eq('id', req.user.id)
+            .select()
+            .single();
 
-        const user = await User.findByIdAndUpdate(req.user.id, fieldsToUpdate, {
-            new: true,
-            runValidators: true
-        });
+        if (error) throw error;
 
         res.status(200).json({
             success: true,
@@ -260,20 +244,39 @@ exports.updateDetails = async (req, res) => {
 // @access  Private
 exports.updatePassword = async (req, res) => {
     try {
-        const user = await User.findById(req.user.id).select('+password');
+        const { currentPassword, newPassword } = req.body;
+
+        const { data: user, error } = await supabase
+            .from('users')
+            .select('password')
+            .eq('id', req.user.id)
+            .single();
+
+        if (error || !user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
 
         // Check current password
-        if (!(await user.matchPassword(req.body.currentPassword))) {
+        const isMatch = await bcrypt.compare(currentPassword, user.password);
+        if (!isMatch) {
             return res.status(401).json({
                 success: false,
                 message: 'Current password is incorrect'
             });
         }
 
-        user.password = req.body.newPassword;
-        await user.save();
+        // Hash new password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-        const token = generateToken(user._id);
+        const { error: updateError } = await supabase
+            .from('users')
+            .update({ password: hashedPassword })
+            .eq('id', req.user.id);
+
+        if (updateError) throw updateError;
+
+        const token = generateToken(req.user.id);
 
         res.status(200).json({
             success: true,
