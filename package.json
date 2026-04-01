@@ -1,4 +1,8 @@
 {
+  "name": "legalai",
+  "scripts": {
+    "dev": "start cmd /k \"cd server && node src/server.js\" && start cmd /k \"cd ai-service && python main.py\" && cd client && node node_modules/vite/bin/vite.js"
+  },
   "dependencies": {
     "mongodb": "^7.1.0"
   }

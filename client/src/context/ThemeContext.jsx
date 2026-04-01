@@ -18,8 +18,19 @@ export const ThemeProvider = ({ children }) => {
     });
 
     useEffect(() => {
-        document.documentElement.setAttribute('data-theme', theme);
+        const root = document.documentElement;
+        
+        // Add transitioning attribute for smooth animation
+        root.setAttribute('data-theme-transitioning', '');
+        root.setAttribute('data-theme', theme);
         localStorage.setItem('theme', theme);
+        
+        // Remove transitioning attribute after animation
+        const timer = setTimeout(() => {
+            root.removeAttribute('data-theme-transitioning');
+        }, 500);
+        
+        return () => clearTimeout(timer);
     }, [theme]);
 
     const toggleTheme = () => {

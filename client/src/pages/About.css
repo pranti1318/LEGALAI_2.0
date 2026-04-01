@@ -1,8 +1,8 @@
 :root {
-    --bg-dark: #07070a;
-    --bg-card: #0f0f14;
-    --accent-glow: rgba(99, 102, 241, 0.15);
-    --text-dim: #94a3b8;
+    --bg-dark: #1a0a1e;
+    --bg-card: #2d1b3d;
+    --accent-glow: rgba(255, 107, 157, 0.2);
+    --text-dim: #b87a94;
 }
 
 .about-page {
@@ -48,7 +48,7 @@
 .orb-2 {
     width: 500px;
     height: 500px;
-    background: #ec4899;
+    background: #ffa07a;
     bottom: -50px;
     right: -50px;
     animation: pulse 8s infinite alternate-reverse;

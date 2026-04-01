@@ -35,7 +35,7 @@
     background: var(--accent-gradient);
     border-radius: var(--radius-md);
     color: white;
-    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+    box-shadow: 0 4px 15px rgba(255, 107, 157, 0.4);
 }
 
 .logo-text {
@@ -97,12 +97,38 @@
     justify-content: center;
     cursor: pointer;
     transition: all var(--transition-fast);
+    position: relative;
+    overflow: hidden;
+}
+
+.theme-toggle::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--accent-gradient);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+
+.theme-toggle:hover::before {
+    opacity: 1;
 }
 
 .theme-toggle:hover {
-    background: var(--accent-primary);
-    color: white;
     border-color: var(--accent-primary);
+    transform: scale(1.05);
+    box-shadow: var(--shadow-glow);
+}
+
+.theme-toggle svg {
+    position: relative;
+    z-index: 1;
+    transition: transform 0.5s ease, color var(--transition-fast);
+}
+
+.theme-toggle:hover svg {
+    color: white;
+    transform: rotate(180deg);
 }
 
 .auth-buttons {
